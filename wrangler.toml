@@ -1,0 +1,9 @@
+name = "mikoflix-stream-worker"
+main = "src/index.js"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+account_id = "e2ae151d83493161ed6d26d4645dc952"
+
+[vars]
+ALLOWED_ORIGINS = "https://mikoflix.site,https://www.mikoflix.site,https://api.mikoflix.site,http://localhost:3000"
+ENVIRONMENT = "production"
