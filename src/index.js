@@ -236,8 +236,16 @@ export default {
     let targetOrigin = '';
     try {
       if (targetUrl.includes('as-cdn') || targetUrl.includes('animesky')) {
-        if (!targetReferer) targetReferer = 'https://as-cdn26.top/video/default';
-        targetOrigin = 'https://as-cdn26.top';
+        // AS-CDN Nginx strictly blocks if Origin header is sent from CF workers!
+        // Strip Origin completely and only send Referer:
+        targetOrigin = '';
+        if (!targetReferer || targetReferer.includes('mikoflix')) {
+          try {
+            targetReferer = new URL(targetUrl).origin + '/';
+          } catch (_) {
+            targetReferer = 'https://as-cdn26.top/';
+          }
+        }
       } else if (targetUrl.includes('zephyrix') || targetUrl.includes('zn-grid')) {
         targetReferer = 'https://play.zephyrix.org/';
         targetOrigin = 'https://play.zephyrix.org';
@@ -268,6 +276,9 @@ export default {
       };
       if (targetReferer) upstreamHeaders['Referer'] = targetReferer;
       if (targetOrigin) upstreamHeaders['Origin'] = targetOrigin;
+      if (targetUrl.includes('as-cdn') || targetUrl.includes('animesky')) {
+        delete upstreamHeaders['Origin'];
+      }
 
       const range = request.headers.get('Range');
       if (range) upstreamHeaders['Range'] = range;
