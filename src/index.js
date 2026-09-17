@@ -165,31 +165,12 @@ export default {
     const keyHex = env?.LINK_CRYPTO_KEY || DEFAULT_KEY_HEX;
     const rawKeyBytes = hexToBytes(keyHex);
 
-    // 1. Scraper endpoint (for upstream HTML bypass)
+    // 1. Scraper endpoint (Blocked on Stream Worker)
     if (pathname === '/scrape') {
-      const scrapeUrl = url.searchParams.get('url');
-      if (!scrapeUrl || !scrapeUrl.startsWith('http')) {
-        return new Response('400 Bad Request: Missing url', { status: 400, headers: corsHeaders });
-      }
-      try {
-        const scrapeRes = await fetch(scrapeUrl, {
-          headers: {
-            'User-Agent': UA,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': scrapeUrl,
-            'Origin': new URL(scrapeUrl).origin,
-          },
-          redirect: 'follow',
-        });
-        const html = await scrapeRes.text();
-        return new Response(html, {
-          status: scrapeRes.status,
-          headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8', 'Server': 'Mikoflix-Shield' },
-        });
-      } catch (err) {
-        return new Response('502 Scrape Error: ' + err.message, { status: 502, headers: corsHeaders });
-      }
+      return new Response("400 Bad Request: Dedicated Stream Worker does not handle scraping. Route to dedicated proxy-worker.", {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "text/plain" }
+      });
     }
 
     // 2. Identify targetUrl & targetReferer (via Encrypted Token or Query fallback)
