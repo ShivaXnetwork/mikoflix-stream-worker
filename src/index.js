@@ -121,8 +121,15 @@ async function rewriteM3u8Content(text, baseUrl, referer, workerOrigin, rawKeyBy
       if (match) {
         try {
           const abs = new URL(match[1], base).href;
+          const clean = abs.split('?')[0].toLowerCase();
           const token = await encryptToken({ u: abs, r: referer, t: Date.now() }, rawKeyBytes);
-          out.push(line.replace(match[1], `${workerOrigin}/p/${token}.m3u8`));
+          let ext = '.m3u8';
+          if (trimmed.startsWith('#EXT-X-KEY') || clean.endsWith('.key')) {
+            ext = '.key';
+          } else if (trimmed.startsWith('#EXT-X-MAP') || clean.endsWith('.mp4') || clean.endsWith('.m4s')) {
+            ext = '.mp4';
+          }
+          out.push(line.replace(match[1], `${workerOrigin}/p/${token}${ext}`));
           continue;
         } catch (_) {}
       }
@@ -134,7 +141,7 @@ async function rewriteM3u8Content(text, baseUrl, referer, workerOrigin, rawKeyBy
       const absUrl = new URL(trimmed, base).href;
       const clean = absUrl.split('?')[0].toLowerCase();
       const isSub = clean.includes('/hls/') || clean.endsWith('.m3u8') || clean.includes('playlist') || clean.includes('master');
-      const ext = isSub ? '.m3u8' : (clean.endsWith('.woff') ? '.woff' : (clean.endsWith('.js') ? '.js' : '.ts'));
+      const ext = isSub ? '.m3u8' : (clean.endsWith('.mp4') || clean.endsWith('.m4s') ? '.mp4' : (clean.endsWith('.woff') ? '.woff' : '.ts'));
       const token = await encryptToken({ u: absUrl, r: referer, t: Date.now() }, rawKeyBytes);
       out.push(`${workerOrigin}/p/${token}${ext}`);
     } catch (_) {
@@ -236,8 +243,6 @@ export default {
     let targetOrigin = '';
     try {
       if (targetUrl.includes('as-cdn') || targetUrl.includes('animesky')) {
-        // AS-CDN Nginx strictly blocks if Origin header is sent from CF workers!
-        // Strip Origin completely and only send Referer:
         targetOrigin = '';
         if (!targetReferer || targetReferer.includes('mikoflix')) {
           try {
@@ -265,8 +270,7 @@ export default {
         'User-Agent': UA,
         'Accept': '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
-        // Full browser-client header set — some protected CDNs (e.g. megap.shiora)
-        // only challenge requests missing these, which would otherwise 403.
+        // Full browser-client header set
         'Sec-Fetch-Dest': 'empty',
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'cross-site',
@@ -276,8 +280,26 @@ export default {
       };
       if (targetReferer) upstreamHeaders['Referer'] = targetReferer;
       if (targetOrigin) upstreamHeaders['Origin'] = targetOrigin;
+
       if (targetUrl.includes('as-cdn') || targetUrl.includes('animesky')) {
+        // Upstream Nginx hotlink protection strictly blocks Origin headers from edge workers
         delete upstreamHeaders['Origin'];
+        delete upstreamHeaders['origin'];
+
+        // Ensure Referer matches the upstream provider host
+        try {
+          const parsedTarget = new URL(targetUrl);
+          upstreamHeaders['Referer'] = `${parsedTarget.origin}/`;
+        } catch (_) {
+          upstreamHeaders['Referer'] = 'https://as-cdn26.top/';
+        }
+
+        upstreamHeaders['User-Agent'] = UA;
+        upstreamHeaders['Accept'] = '*/*';
+        upstreamHeaders['Accept-Language'] = 'en-US,en;q=0.9';
+        upstreamHeaders['Sec-Fetch-Mode'] = 'cors';
+        upstreamHeaders['Sec-Fetch-Site'] = 'cross-site';
+        upstreamHeaders['Sec-Fetch-Dest'] = 'empty';
       }
 
       const range = request.headers.get('Range');
@@ -298,6 +320,20 @@ export default {
       }
       for (const [k, v] of Object.entries(corsHeaders)) responseHeaders.set(k, v);
       responseHeaders.set('Server', 'Mikoflix-Shield');
+
+      const isExplicitSegment = pathname.endsWith('.ts') || pathname.endsWith('.m4s') || pathname.endsWith('.mp4') || pathname.endsWith('.key') || pathname.endsWith('.woff');
+
+      if (isExplicitSegment) {
+        if (pathname.endsWith('.ts')) {
+          responseHeaders.set('Content-Type', 'video/MP2T');
+        } else if (pathname.endsWith('.m4s') || pathname.endsWith('.mp4')) {
+          responseHeaders.set('Content-Type', 'video/mp4');
+        } else if (pathname.endsWith('.key')) {
+          responseHeaders.set('Content-Type', 'application/octet-stream');
+        }
+        responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+        return new Response(upstreamRes.body, { status: upstreamRes.status, headers: responseHeaders });
+      }
 
       const ct = upstreamRes.headers.get('content-type') || '';
       const isM3u8Url = targetUrl.split('?')[0].toLowerCase().endsWith('.m3u8') || targetUrl.includes('/hls/');
